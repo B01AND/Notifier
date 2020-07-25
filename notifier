@@ -1,0 +1,49 @@
+#!/usr/bin/perl
+
+# This script accepts 'walletnotify' triggers from zcashd/ycashd then routes the notification to another script based on the destination address
+# If allows a single node to service many different things/clients/actions
+
+# load the config file format is "address script"
+my $conf;
+open(CONF, "<", "notifier.conf") or die("Can't open notifier.conf");
+while ($line = readline(CONF)) {
+	$line =~ s/\#.*//;		# remove comments comments
+	$line =~ s/\s+/\#/g;		# remove duplicate whitespace
+	my @split = split('#', $line);
+	my $splitsize = @split;
+	$conf->{$split[0]} = join(" ", @split[1..$splitsize]);
+}
+close(CONF);
+
+foreach my $coin ('zcash', 'ycash') {
+
+	if ($coin eq 'zcash') {		# zcash, lookup the transaction directly (kinda neat for shielded!)
+
+		my @lines = split("\n", `zcash-cli z_viewtransaction $ARGV[0] 2>/dev/null`);
+		foreach my $line (@lines) {			# quicker than parsing JSON
+			if ($line =~ m/address/ ) {		# only interested in the address line
+				$line =~ s/\^*.+\"zs1/zs1/;
+				$line =~ s/\"*.$//;
+	
+				$conf->{$line} =~ s/\%s/$ARGV[0]/g;
+				exec "$conf->{$line}";
+			}
+		}
+	}
+
+	elsif ($coin eq 'ycash') {	# ycash, search all addresses for the transaction
+
+		foreach my $address (keys %{$conf}) {	# but we're only interested in the registered ones !
+			if ($address =~ m/ys1/) {	# ycash only
+				
+				my $txn = `ycash-cli z_listreceivedbyaddress $address 0 2>/dev/null`;
+				if ($txn =~ m/$ARGV[0]/) {		# search for txid
+					$conf->{$address} =~ s/\%s/$ARGV[0]/g;
+					exec "$conf->{$address}";
+				}
+			}
+		}
+	}
+}
+
+
