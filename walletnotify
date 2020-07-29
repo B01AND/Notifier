@@ -17,26 +17,26 @@ close(CONF);
 
 foreach my $coin ('zcash', 'ycash') {
 
-	if ($coin eq 'zcash') {		# zcash, lookup the transaction directly (kinda neat for shielded!)
+	if ($coin eq 'zcash') {			# zcash, search all addresses for the transaction
 
-		my @lines = split("\n", `zcash-cli z_viewtransaction $ARGV[0] 2>/dev/null`);
-		foreach my $line (@lines) {			# quicker than parsing JSON
-			if ($line =~ m/address/ ) {		# only interested in the address line
-				$line =~ s/\^*.+\"zs1/zs1/;
-				$line =~ s/\"*.$//;
-	
-				if ($conf->{$line}) {
-					$conf->{$line} =~ s/\%s/$ARGV[0]/g;
-					exec "$conf->{$line}";
+		foreach my $address (keys %{$conf}) {	# but we're only interested in the registered ones !
+			if ($address =~ m/zs1/) {	# ycash only
+				
+				my $txn = `zcash-cli z_listreceivedbyaddress $address 0 2>/dev/null`;
+				if ($txn =~ m/$ARGV[0]/) {		# search for txid
+					if ($conf->{$address}) {
+						$conf->{$address} =~ s/\%s/$ARGV[0]/g;
+						exec "$conf->{$address}";
+					}
+					exit;
 				}
-				exit;
 			}
 		}
 		$conf->{"zcash"} =~ s/\%s/$ARGV[0]/g;		# default
 		exec "$conf->{$line}";
 	}
 
-	elsif ($coin eq 'ycash') {	# ycash, search all addresses for the transaction
+	elsif ($coin eq 'ycash') {		# ycash, search all addresses for the transaction
 
 		foreach my $address (keys %{$conf}) {	# but we're only interested in the registered ones !
 			if ($address =~ m/ys1/) {	# ycash only
