@@ -1,59 +1,81 @@
 #!/usr/bin/perl
 
-# This script accepts 'walletnotify' triggers from zcashd/ycashd then routes the notification to another script based on the destination address
-# If allows a single node to service many different things/clients/actions
+use JSON;
+use Data::Dumper;
 
-# load the config file format is "address script"
-my $conf;
-open(CONF, "<", "/home/bob/crypto/walletnotify.conf") or die("Can't open /home/bob/crypto/walletnotify.conf");
+# This script accepts 'walletnotify' triggers from zcashd/ycashd and executes a command based on the receiving address.
+#
+# Shielded addresses only :-)
+
+my $installdir = "$ENV{'HOME'}/.walletnotify";
+
+#####################################################################################################################################################
+# DONT CHANGE ANYTHING BELOW THIS LINE
+#####################################################################################################################################################
+
+use File::Path qw(make_path);
+
+my ($coin, $txid) = @ARGV;			# always called with coin & txid
+
+
+make_path ("$installdir/logs");
+open (DEBUG, '>>', "$installdir/logs/walletnotify.log");
+print DEBUG "New: $coin, $txid\n";
+
+$coin = lc($coin);
+if ( ($coin ne "ycash") && ($coin ne "zcash") ) {
+	print DEBUG "Bad coin type!!\n\nUsage: walletnotify <ycash|zcash> <txid>\n";
+	exit;
+}
+if (length($txid) != 64) {
+	print DEBUG "Bad TXID!!\n\nUsage: walletnotify <ycash|zcash> <txid>\n";
+	exit;
+}
+
+my $conf;								# load config
+open(CONF, "<", "$installdir/config/walletnotify.conf") or die("Can't open $installdir/config/walletnotify.conf");
 while ($line = readline(CONF)) {
-	$line =~ s/\#.*//;		# remove comments comments
-	$line =~ s/\s+/\#/g;		# remove duplicate whitespace
-	my @split = split('#', $line);
+	$line =~ s/\#.*//;						# remove comments
+	$line =~ s/\s+/\#/g;						# remove duplicate whitespace
+	my @split = split('#', $line);		
 	my $splitsize = @split;
 	$conf->{$split[0]} = join(" ", @split[1..$splitsize]);
 }
 close(CONF);
 
-foreach my $coin ('zcash', 'ycash') {
+my $z_listaddresses = `$coin-cli z_listaddresses true 2>/dev/null`;	# list all addresses on this node (inc watchonly)
+my $eval = eval { decode_json($z_listaddresses) };
+if (!$@) {
+	foreach my $zaddr (@{decode_json($z_listaddresses)}) {				# step through addresses
 
-	if ($coin eq 'zcash') {			# zcash, search all addresses for the transaction
+		my $z_listreceivedbyaddress = `$coin-cli z_listreceivedbyaddress $zaddr 0 2>/dev/null`;	
 
-		foreach my $address (keys %{$conf}) {	# but we're only interested in the registered ones !
-			if ($address =~ m/zs1/) {	# ycash only
-				
-				my $txn = `zcash-cli z_listreceivedbyaddress $address 0 2>/dev/null`;
-				if ($txn =~ m/$ARGV[0]/) {		# search for txid
-					if ($conf->{$address}) {
-						$conf->{$address} =~ s/\%s/$ARGV[0]/g;
-						exec "$conf->{$address}";
+		my $eval = eval { decode_json($z_listreceivedbyaddress) };
+		if (!$@) {
+
+			foreach my $txn (@{decode_json($z_listreceivedbyaddress)}) {	# step through transactions
+
+				if ($txn->{'txid'} eq $txid) {				# found the txid
+					
+					if (!$conf->{$zaddr}) {				# get command from config
+						$conf->{$zaddr} = $conf->{$coin};	# ...use default if not specified
 					}
-					exit;
+					
+					$conf->{$zaddr} =~ s/\%txid/$txid/;				# transaction id
+					$conf->{$zaddr} =~ s/\%zaddr/$zaddr/;				# address
+
+					$amount = sprintf("%d", ($txn->{'amount'} * 100000000));	# amount (in zats!)
+					$conf->{$zaddr} =~ s/\%amount/$amount/;
+
+					print DEBUG "Exec: $conf->{$zaddr}\n";
+					close (DEBUG);
+
+					exec($conf->{$zaddr});				# exec
 				}
 			}
 		}
-		$conf->{"zcash"} =~ s/\%s/$ARGV[0]/g;		# default
-		exec "$conf->{$line}";
-	}
-
-	elsif ($coin eq 'ycash') {		# ycash, search all addresses for the transaction
-
-		foreach my $address (keys %{$conf}) {	# but we're only interested in the registered ones !
-			if ($address =~ m/ys1/) {	# ycash only
-				
-				my $txn = `ycash-cli z_listreceivedbyaddress $address 0 2>/dev/null`;
-				if ($txn =~ m/$ARGV[0]/) {		# search for txid
-					if ($conf->{$address}) {
-						$conf->{$address} =~ s/\%s/$ARGV[0]/g;
-						exec "$conf->{$address}";
-					}
-					exit;
-				}
-			}
-		}
-		$conf->{"ycash"} =~ s/\%s/$ARGV[0]/g;		# default
-		exec "$conf->{$line}";
 	}
 }
 
-
+close(DEBUG);
+exit;
