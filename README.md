@@ -12,7 +12,7 @@ walletnotify="/path/to/this/script %s"
 
 In the walletnotify.conf file :-
 
-  %txid   - transaction ID
-  %zaddr  - shielded address involved in this transaction
+  - %txid   transaction ID
+  - %zaddr  shielded address involved in this transaction
 
 You can also specify a default action for each coin type if the sheilded address is not specified.
